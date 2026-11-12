@@ -37,7 +37,7 @@ find_package(react-native-worklets-core REQUIRED CONFIG)
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../build/generated/source/codegen/jni" generated)
 set(LIBGODOT_CPP_VERSION ${GODOT_CPP_VERSION})
-set(LIBGODOT_CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../libs/libgodot-cpp-android/${LIBGODOT_CPP_VERSION}/godot-cpp-android)
+set(LIBGODOT_CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../libs/libgodot-cpp-android/${LIBGODOT_CPP_VERSION}/godot-cpp-android${GODOT_CPP_FLAVOR})
 
 add_library(
         godot-cpp

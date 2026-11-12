@@ -138,7 +138,9 @@ android {
                     "-DANDROID_TOOLCHAIN=clang",
                     "-DREACT_NATIVE_DIR=${toPlatformFileString(reactNativeRootDir.path)}",
                     "-DIS_NEW_ARCHITECTURE_ENABLED=${isNewArchitectureEnabled().toString()}",
-                    "-DGODOT_CPP_VERSION=${godotCppVersion}"
+                    "-DGODOT_CPP_VERSION=${godotCppVersion}",
+                    // Release builds link the godot-cpp built for the release engine.
+                    "-DGODOT_CPP_FLAVOR=${resolveBuildType() == 'release' ? '-release' : ''}"
         }
     }
   }
@@ -231,7 +233,10 @@ repositories {
 dependencies {
   implementation 'com.facebook.react:react-native'
   implementation project(':react-native-worklets-core')
-  api "com.migeran.libgodot:godot-debug:${libGodotVersion}-SNAPSHOT"
+  // The prebuilt download only ships the debug engine; the release engine (artifact "godot")
+  // is built from source and installed next to it in the same local Maven repository.
+  debugApi "com.migeran.libgodot:godot-debug:${libGodotVersion}-SNAPSHOT"
+  releaseApi "com.migeran.libgodot:godot:${libGodotVersion}-SNAPSHOT"
   implementation('com.jakewharton.threetenabp:threetenabp:1.4.9')
 }
 

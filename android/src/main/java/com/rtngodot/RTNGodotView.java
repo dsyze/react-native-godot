@@ -101,16 +101,28 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 	@Override
 	public boolean onTouchEvent(MotionEvent event) {
 		super.onTouchEvent(event);
+		if (mInputHandler == null) {
+			mInputHandler = RTNLibGodot.getInstance().getInputHandler();
+			if (mInputHandler == null) return false;
+		}
 		return mInputHandler.onTouchEvent(event);
 	}
 
 	@Override
 	public boolean onGenericMotionEvent(MotionEvent event) {
+		if (mInputHandler == null) {
+			mInputHandler = RTNLibGodot.getInstance().getInputHandler();
+			if (mInputHandler == null) return false;
+		}
 		return mInputHandler.onGenericMotionEvent(event);
 	}
 
 	@Override
 	public boolean onCapturedPointerEvent(MotionEvent event) {
+		if (mInputHandler == null) {
+			mInputHandler = RTNLibGodot.getInstance().getInputHandler();
+			if (mInputHandler == null) return false;
+		}
 		return mInputHandler.onGenericMotionEvent(event);
 	}
 
@@ -122,19 +134,19 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 	public void requestPointerCapture() {
 		if (canCapturePointer()) {
 			super.requestPointerCapture();
-			mInputHandler.onPointerCaptureChange(true);
+			if (mInputHandler != null) mInputHandler.onPointerCaptureChange(true);
 		}
 	}
 
 	@Override
 	public void releasePointerCapture() {
 		super.releasePointerCapture();
-		mInputHandler.onPointerCaptureChange(false);
+		if (mInputHandler != null) mInputHandler.onPointerCaptureChange(false);
 	}
 
 	@Override
 	public void onPointerCaptureChange(boolean hasCapture) {
 		super.onPointerCaptureChange(hasCapture);
-		mInputHandler.onPointerCaptureChange(hasCapture);
+		if (mInputHandler != null) mInputHandler.onPointerCaptureChange(hasCapture);
 	}
 }

@@ -220,7 +220,7 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 		if (canCapturePointer()) {
 			super.requestPointerCapture();
 			if (mInputHandler != null) {
-				mInputHandler.onPointerCaptureChange(true);
+				if (mInputHandler != null) mInputHandler.onPointerCaptureChange(true);
 			}
 		}
 	}
@@ -229,7 +229,7 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 	public void releasePointerCapture() {
 		super.releasePointerCapture();
 		if (mInputHandler != null) {
-			mInputHandler.onPointerCaptureChange(false);
+			if (mInputHandler != null) mInputHandler.onPointerCaptureChange(false);
 		}
 	}
 
@@ -237,7 +237,7 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 	public void onPointerCaptureChange(boolean hasCapture) {
 		super.onPointerCaptureChange(hasCapture);
 		if (mInputHandler != null) {
-			mInputHandler.onPointerCaptureChange(hasCapture);
+			if (mInputHandler != null) mInputHandler.onPointerCaptureChange(hasCapture);
 		}
 	}
 }

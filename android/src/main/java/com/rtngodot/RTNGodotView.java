@@ -1,28 +1,3 @@
-/**************************************************************************/
-/*  RTNGodotView.java                                                     */
-/**************************************************************************/
-/* Copyright (c) 2024-2025 Slay GmbH                                      */
-/*                                                                        */
-/* Permission is hereby granted, free of charge, to any person obtaining  */
-/* a copy of this software and associated documentation files (the        */
-/* "Software"), to deal in the Software without restriction, including    */
-/* without limitation the rights to use, copy, modify, merge, publish,    */
-/* distribute, sublicense, and/or sell copies of the Software, and to     */
-/* permit persons to whom the Software is furnished to do so, subject to  */
-/* the following conditions:                                              */
-/*                                                                        */
-/* The above copyright notice and this permission notice shall be         */
-/* included in all copies or substantial portions of the Software.        */
-/*                                                                        */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
-/**************************************************************************/
-
 package com.rtngodot;
 
 import org.godotengine.godot.input.GodotInputHandler;
@@ -39,25 +14,45 @@ import android.view.ViewGroup;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.ReactContext;
+import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
+
 public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2 {
 	private static final String TAG = "RTNGodotView";
 
 	private String windowName = "";
-
 	private GodotInputHandler mInputHandler;
+	private ReactContext mReactContext;
+
+	// 双指手势状态
+	private boolean mTwoFingerActive = false;
+	private float mPrevDist = 0;
+	private float mPrevCenterX = 0;
+	private float mPrevCenterY = 0;
 
 	public RTNGodotView(Context context) {
 		super(context);
+		if (context instanceof ReactContext) {
+			mReactContext = (ReactContext) context;
+		}
 		this.configureComponent();
 	}
 
 	public RTNGodotView(Context context, @Nullable AttributeSet attrs) {
 		super(context, attrs);
+		if (context instanceof ReactContext) {
+			mReactContext = (ReactContext) context;
+		}
 		this.configureComponent();
 	}
 
 	public RTNGodotView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
 		super(context, attrs, defStyleAttr);
+		if (context instanceof ReactContext) {
+			mReactContext = (ReactContext) context;
+		}
 		this.configureComponent();
 	}
 
@@ -97,20 +92,122 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 		RTNLibGodot.getInstance().removeWindow(windowName);
 	}
 
+	// ===== 双指手势辅助方法 =====
+
+	private float getTwoFingerDist(MotionEvent event) {
+		float dx = event.getX(0) - event.getX(1);
+		float dy = event.getY(0) - event.getY(1);
+		return (float) Math.sqrt(dx * dx + dy * dy);
+	}
+
+	private float getTwoFingerCenterX(MotionEvent event) {
+		return (event.getX(0) + event.getX(1)) / 2f;
+	}
+
+	private float getTwoFingerCenterY(MotionEvent event) {
+		return (event.getY(0) + event.getY(1)) / 2f;
+	}
+
+	private void sendEvent(String eventName, WritableMap params) {
+		if (mReactContext != null && mReactContext.hasActiveReactInstance()) {
+			mReactContext
+				.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+				.emit(eventName, params);
+		}
+	}
+
+	private boolean handleTwoFingerGesture(MotionEvent event) {
+		int action = event.getActionMasked();
+
+		if (event.getPointerCount() >= 2) {
+			if (!mTwoFingerActive) {
+				// 双指开始
+				mTwoFingerActive = true;
+				mPrevDist = getTwoFingerDist(event);
+				mPrevCenterX = getTwoFingerCenterX(event);
+				mPrevCenterY = getTwoFingerCenterY(event);
+				return true;
+			}
+
+			if (action == MotionEvent.ACTION_MOVE) {
+				float dist = getTwoFingerDist(event);
+				float centerX = getTwoFingerCenterX(event);
+				float centerY = getTwoFingerCenterY(event);
+
+				// 缩放
+				if (mPrevDist > 0) {
+					float factor = dist / mPrevDist;
+					if (Math.abs(factor - 1.0f) > 0.005f) {
+						WritableMap params = Arguments.createMap();
+						params.putDouble("factor", factor);
+						sendEvent("godotPinch", params);
+					}
+				}
+
+				// 平移
+				float dx = centerX - mPrevCenterX;
+				float dy = centerY - mPrevCenterY;
+				if (Math.abs(dx) > 0.5f || Math.abs(dy) > 0.5f) {
+					WritableMap params = Arguments.createMap();
+					params.putDouble("dx", dx);
+					params.putDouble("dy", dy);
+					sendEvent("godotPan", params);
+				}
+
+				mPrevDist = dist;
+				mPrevCenterX = centerX;
+				mPrevCenterY = centerY;
+				return true;
+			}
+		}
+
+		// 手指抬起时重置
+		if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+				|| action == MotionEvent.ACTION_POINTER_UP) {
+			if (event.getPointerCount() <= 2) {
+				mTwoFingerActive = false;
+				mPrevDist = 0;
+			}
+		}
+
+		return mTwoFingerActive;
+	}
+
+	// ===== 触摸事件 =====
+
 	@SuppressLint("ClickableViewAccessibility")
 	@Override
 	public boolean onTouchEvent(MotionEvent event) {
 		super.onTouchEvent(event);
+		if (mInputHandler == null) {
+			mInputHandler = RTNLibGodot.getInstance().getInputHandler();
+			if (mInputHandler == null) return false;
+		}
+
+		// 双指时自己处理，不传给 Godot 的 GestureHandler
+		if (event.getPointerCount() >= 2 || mTwoFingerActive) {
+			return handleTwoFingerGesture(event);
+		}
+
+		// 单指传给 Godot
 		return mInputHandler.onTouchEvent(event);
 	}
 
 	@Override
 	public boolean onGenericMotionEvent(MotionEvent event) {
+		if (mInputHandler == null) {
+			mInputHandler = RTNLibGodot.getInstance().getInputHandler();
+			if (mInputHandler == null) return false;
+		}
 		return mInputHandler.onGenericMotionEvent(event);
 	}
 
 	@Override
 	public boolean onCapturedPointerEvent(MotionEvent event) {
+		if (mInputHandler == null) {
+			mInputHandler = RTNLibGodot.getInstance().getInputHandler();
+			if (mInputHandler == null) return false;
+		}
 		return mInputHandler.onGenericMotionEvent(event);
 	}
 
@@ -122,19 +219,25 @@ public class RTNGodotView extends SurfaceView implements SurfaceHolder.Callback2
 	public void requestPointerCapture() {
 		if (canCapturePointer()) {
 			super.requestPointerCapture();
-			mInputHandler.onPointerCaptureChange(true);
+			if (mInputHandler != null) {
+				mInputHandler.onPointerCaptureChange(true);
+			}
 		}
 	}
 
 	@Override
 	public void releasePointerCapture() {
 		super.releasePointerCapture();
-		mInputHandler.onPointerCaptureChange(false);
+		if (mInputHandler != null) {
+			mInputHandler.onPointerCaptureChange(false);
+		}
 	}
 
 	@Override
 	public void onPointerCaptureChange(boolean hasCapture) {
 		super.onPointerCaptureChange(hasCapture);
-		mInputHandler.onPointerCaptureChange(hasCapture);
+		if (mInputHandler != null) {
+			mInputHandler.onPointerCaptureChange(hasCapture);
+		}
 	}
 }

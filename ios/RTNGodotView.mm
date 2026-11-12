@@ -25,6 +25,9 @@
 
 #import <React/RCTLog.h>
 #import <React/RCTUIManager.h>
+#import <React/RCTEventDispatcher.h>
+#import <React/RCTBridge.h>
+#import <React/RCTRootView.h>
 
 #include <libgodot/libgodot.h>
 #include <godot_cpp/classes/display_server_embedded.hpp>
@@ -66,6 +69,12 @@ static UIView *_currentView = nil;
 	bool _propsUpdated;
 	bool _instanceCallbackRegistered;
 	bool _addingGodotView;
+	
+	// 双指手势状态
+	BOOL _twoFingerActive;
+	CGFloat _prevDist;
+	CGPoint _prevCenter;
+	__weak RCTBridge *_bridge;
 }
 
 + (BOOL)shouldBeRecycled {
@@ -138,6 +147,11 @@ static UIView *_currentView = nil;
 	_instanceCallbackRegistered = false;
 	_windowName = @"";
 	_addingGodotView = false;
+	
+	// 初始化双指手势状态
+	_twoFingerActive = NO;
+	_prevDist = 0;
+	_prevCenter = CGPointZero;
 }
 
 //Setter method
@@ -412,8 +426,91 @@ static UIView *_currentView = nil;
 	_touches[touchId] = nil;
 }
 
+// ===== 双指手势辅助方法 =====
+
+- (CGFloat)getTwoFingerDist:(NSSet<UITouch *> *)touches {
+	if (touches.count < 2) return 0;
+	
+	NSArray *touchArray = [touches allObjects];
+	UITouch *touch1 = touchArray[0];
+	UITouch *touch2 = touchArray[1];
+	
+	CGPoint loc1 = [touch1 locationInView:self];
+	CGPoint loc2 = [touch2 locationInView:self];
+	
+	CGFloat dx = loc1.x - loc2.x;
+	CGFloat dy = loc1.y - loc2.y;
+	return sqrt(dx * dx + dy * dy);
+}
+
+- (CGPoint)getTwoFingerCenter:(NSSet<UITouch *> *)touches {
+	if (touches.count < 2) return CGPointZero;
+	
+	NSArray *touchArray = [touches allObjects];
+	UITouch *touch1 = touchArray[0];
+	UITouch *touch2 = touchArray[1];
+	
+	CGPoint loc1 = [touch1 locationInView:self];
+	CGPoint loc2 = [touch2 locationInView:self];
+	
+	return CGPointMake((loc1.x + loc2.x) / 2.0f, (loc1.y + loc2.y) / 2.0f);
+}
+
+- (void)sendEvent:(NSString *)eventName params:(NSDictionary *)params {
+	// 通过 NSNotificationCenter 发送，由 GodotEventBridge.m 监听后转发到 JS NativeEventEmitter
+	[[NSNotificationCenter defaultCenter] postNotificationName:eventName
+	                                                    object:nil
+	                                                  userInfo:params];
+}
+
+- (BOOL)handleTwoFingerGesture:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+	NSUInteger touchCount = [[event touchesForView:self] count];
+	
+	if (touchCount >= 2) {
+		if (!_twoFingerActive) {
+			// 双指开始
+			_twoFingerActive = YES;
+			_prevDist = [self getTwoFingerDist:[event touchesForView:self]];
+			_prevCenter = [self getTwoFingerCenter:[event touchesForView:self]];
+			return YES;
+		}
+		
+		// 双指移动
+		CGFloat dist = [self getTwoFingerDist:[event touchesForView:self]];
+		CGPoint center = [self getTwoFingerCenter:[event touchesForView:self]];
+		
+		// 缩放
+		if (_prevDist > 0) {
+			CGFloat factor = dist / _prevDist;
+			if (fabs(factor - 1.0f) > 0.005f) {
+				[self sendEvent:@"godotPinch" params:@{@"factor": @(factor)}];
+			}
+		}
+		
+		// 平移
+		CGFloat dx = center.x - _prevCenter.x;
+		CGFloat dy = center.y - _prevCenter.y;
+		if (fabs(dx) > 0.5f || fabs(dy) > 0.5f) {
+			[self sendEvent:@"godotPan" params:@{@"dx": @(dx), @"dy": @(dy)}];
+		}
+		
+		_prevDist = dist;
+		_prevCenter = center;
+		return YES;
+	}
+	
+	return _twoFingerActive;
+}
+
 - (void)touchesBegan:(NSSet<UITouch *> *)touches
 		   withEvent:(UIEvent *)event {
+	// 检查是否是双指手势
+	NSUInteger totalTouches = [[event touchesForView:self] count];
+	if (totalTouches >= 2 || _twoFingerActive) {
+		[self handleTwoFingerGesture:touches withEvent:event];
+		return;
+	}
+	
 	godot::GodotInstance *instance = GodotModule::get_singleton()->get_instance();
 
 	if (!instance || !instance->is_started()) {
@@ -454,6 +551,13 @@ static UIView *_currentView = nil;
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches
 		   withEvent:(UIEvent *)event {
+	// 检查是否是双指手势
+	NSUInteger totalTouches = [[event touchesForView:self] count];
+	if (totalTouches >= 2 || _twoFingerActive) {
+		[self handleTwoFingerGesture:touches withEvent:event];
+		return;
+	}
+	
 	godot::GodotInstance *instance = GodotModule::get_singleton()->get_instance();
 
 	if (!instance || !instance->is_started()) {
@@ -511,6 +615,19 @@ static UIView *_currentView = nil;
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches
 		   withEvent:(UIEvent *)event {
+	// 检查是否需要重置双指状态
+	NSUInteger remainingTouches = [[event touchesForView:self] count] - touches.count;
+	if (remainingTouches < 2) {
+		_twoFingerActive = NO;
+		_prevDist = 0;
+		_prevCenter = CGPointZero;
+	}
+	
+	// 如果是双指模式，不传递给Godot
+	if (_twoFingerActive) {
+		return;
+	}
+	
 	godot::GodotInstance *instance = GodotModule::get_singleton()->get_instance();
 
 	if (!instance || !instance->is_started()) {
@@ -551,6 +668,11 @@ static UIView *_currentView = nil;
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches
 			   withEvent:(UIEvent *)event {
+	// 重置双指状态
+	_twoFingerActive = NO;
+	_prevDist = 0;
+	_prevCenter = CGPointZero;
+	
 	godot::GodotInstance *instance = GodotModule::get_singleton()->get_instance();
 
 	if (!instance || !instance->is_started()) {

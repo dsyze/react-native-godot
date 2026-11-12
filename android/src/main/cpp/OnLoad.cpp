@@ -53,9 +53,11 @@
 // }
 
 #include "native_godot_module_jni.h"
+#include "libgodot_jni.h"
 #include <fbjni/fbjni.h>
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
+	LibGodot::set_java_vm(vm);
 	return facebook::jni::initialize(vm, [] {
 		NativeGodotModuleJNI::registerNatives();
 	});
